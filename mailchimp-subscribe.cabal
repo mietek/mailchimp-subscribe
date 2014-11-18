@@ -12,6 +12,7 @@ executable mailchimp-subscribe
                       http-client,
                       http-client-tls,
                       http-types,
+                      reflection,
                       scotty,
                       text,
                       transformers,

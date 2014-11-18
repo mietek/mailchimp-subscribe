@@ -1,11 +1,13 @@
-{-# LANGUAGE ImplicitParams #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 import Control.Applicative ((<$>))
 import Control.Exception (try)
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson ((.=), ToJSON, toJSON)
+import Data.Reflection (Given, give, given)
 import Data.Text (Text)
 import Network.Wai.Middleware.RequestLogger (logStdout)
 import System.Environment (getEnv, getEnvironment)
@@ -35,10 +37,10 @@ data SubRequest = SubRequest
   deriving (Show)
 
 
-instance (?cfg :: Cfg) => ToJSON SubRequest where
+instance (Given Cfg) => ToJSON SubRequest where
     toJSON request = J.object
-      [ "apikey"          .= cfgMailChimpApiKey ?cfg
-      , "id"              .= cfgMailChimpListId ?cfg
+      [ "apikey"          .= cfgMailChimpApiKey given
+      , "id"              .= cfgMailChimpListId given
       , "merge_vars"      .= J.object ["name"  .= srName         request]
       , "email"           .= J.object ["email" .= srEmailAddress request]
       , "update_existing" .= True
@@ -65,12 +67,12 @@ rejectBadRequest = do
     S.status H.badRequest400
 
 
-redirectToWebsite :: (?cfg :: Cfg) => S.ActionM ()
+redirectToWebsite :: (Given Cfg) => S.ActionM ()
 redirectToWebsite =
-    S.redirect $ LT.fromStrict $ cfgWebsiteUrl ?cfg
+    S.redirect $ LT.fromStrict $ cfgWebsiteUrl given
 
 
-subscribeToList :: (?cfg :: Cfg) => S.ActionM ()
+subscribeToList :: (Given Cfg) => S.ActionM ()
 subscribeToList = do
     name         <- S.param "name"
     emailAddress <- S.param "email-address"
@@ -80,7 +82,7 @@ subscribeToList = do
       False -> rejectNotAcceptable
 
 
-postSubRequest :: (?cfg :: Cfg) => SubRequest -> IO Bool
+postSubRequest :: (Given Cfg) => SubRequest -> IO Bool
 postSubRequest request = do
     manager  <- C.newManager C.tlsManagerSettings
     endpoint <- C.parseUrl "https://us3.api.mailchimp.com/2.0/lists/subscribe"
@@ -102,14 +104,14 @@ main = do
     mailChimpApiKey <- T.pack <$> getEnv "MAILCHIMP_API_KEY"
     mailChimpListId <- T.pack <$> getEnv "MAILCHIMP_LIST_ID"
     websiteUrl      <- T.pack <$> getEnv "WEBSITE_URL"
-    let ?cfg = Cfg
+    let cfg = Cfg
           { cfgMailChimpApiKey = mailChimpApiKey
           , cfgMailChimpListId = mailChimpListId
           , cfgWebsiteUrl      = websiteUrl
           }
     env <- getEnvironment
     let port = maybe 8080 read $ lookup "PORT" env
-    scotty port $ do
+    give cfg $ scotty port $ do
       S.middleware logStdout
       S.get        "/"          redirectToWebsite
       S.post       "/subscribe" subscribeToList

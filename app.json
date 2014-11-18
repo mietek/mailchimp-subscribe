@@ -1,0 +1,12 @@
+{
+  "name": "mailchimp-subscribe",
+  "description": "Haskell/Scotty web back-end for handling MailChimp subscription requests",
+  "repository": "https://github.com/mietek/mailchimp-subscribe",
+  "logo": "https://haskellonheroku.com/_images/logo.svg",
+  "env": {
+    "BUILDPACK_URL": "https://github.com/mietek/haskell-on-heroku",
+    "MAILCHIMP_API_KEY": "",
+    "MAILCHIMP_LIST_ID": "",
+    "WEBSITE_URL": ""
+  }
+}

@@ -5,9 +5,10 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 import Control.Applicative ((<$>))
-import Control.Exception (try)
+import Control.Lens ((^?))
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson ((.=), ToJSON, toJSON)
+import Data.Aeson.Lens (key)
 import Data.Reflection (Given, give, given)
 import Data.Text (Text)
 import Network.Wai.Middleware.RequestLogger (logStdout)
@@ -17,9 +18,8 @@ import Web.Scotty (scotty)
 import qualified Data.Aeson as J
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as LT
-import qualified Network.HTTP.Client as C
-import qualified Network.HTTP.Client.TLS as C
 import qualified Network.HTTP.Types.Status as H
+import qualified Network.Wreq as C
 import qualified Web.Scotty as S
 
 
@@ -91,18 +91,11 @@ instance (Given Cfg) => ToJSON SubscribeReq where
 
 postSubscribeReq :: (Given Cfg) => SubscribeReq -> IO Bool
 postSubscribeReq req = do
-    mgr <- C.newManager C.tlsManagerSettings
-    url <- C.parseUrl "https://us3.api.mailchimp.com/2.0/lists/subscribe"
-    let post = url
-          { C.method      = "POST"
-          , C.requestBody = C.RequestBodyLBS $ J.encode req
-          }
-    response :: Either C.HttpException () <- try $
-      C.withResponse post mgr $ const $ return ()
-    case response of
-      Right _       -> return True
-      Left  failure -> do
-        putStrLn $ "   *** WARNING: Subscription request failed: " ++ show failure
+    res <- C.post "https://us3.api.mailchimp.com/2.0/lists/subscribe" $ toJSON req
+    case res ^? C.responseBody . key "error" of
+      Nothing  -> return True
+      Just err -> do
+        putStrLn $ "   *** ERROR: " ++ show err
         return False
 
 

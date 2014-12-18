@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -22,43 +23,10 @@ import qualified Network.HTTP.Types.Status as H
 import qualified Web.Scotty as S
 
 
-data Cfg = Cfg
-    { cfgMailChimpApiKey :: Text
-    , cfgMailChimpListId :: Text
-    , cfgWebsiteUrl      :: Text
-    }
-  deriving (Show)
-
-
-data SubRequest = SubRequest
-    { srName         :: Text
-    , srEmailAddress :: Text
-    }
-  deriving (Show)
-
-
-instance (Given Cfg) => ToJSON SubRequest where
-    toJSON request = J.object
-      [ "apikey"          .= cfgMailChimpApiKey given
-      , "id"              .= cfgMailChimpListId given
-      , "merge_vars"      .= J.object ["name"  .= srName         request]
-      , "email"           .= J.object ["email" .= srEmailAddress request]
-      , "update_existing" .= True
-      , "double_optin"    .= True
-      , "send_welcome"    .= False
-      ]
-
-
 accept :: S.ActionM ()
 accept = do
     S.html "<h1>202 Accepted</h1>"
     S.status H.accepted202
-
-
-rejectNotAcceptable :: S.ActionM ()
-rejectNotAcceptable = do
-    S.html "<h1>406 Not Acceptable</h1>"
-    S.status H.notAcceptable406
 
 
 rejectBadRequest :: S.ActionM ()
@@ -67,52 +35,115 @@ rejectBadRequest = do
     S.status H.badRequest400
 
 
-redirectToWebsite :: (Given Cfg) => S.ActionM ()
-redirectToWebsite =
-    S.redirect $ LT.fromStrict $ cfgWebsiteUrl given
+rejectNotAcceptable :: S.ActionM ()
+rejectNotAcceptable = do
+    S.html "<h1>406 Not Acceptable</h1>"
+    S.status H.notAcceptable406
+
+
+data Cfg = Cfg
+    { apiKey            :: Text
+    , defListId         :: Maybe Text
+    , defEmailType      :: Maybe Text
+    , defDoubleOptIn    :: Maybe Bool
+    , defUpdateExisting :: Maybe Bool
+    , defSendWelcome    :: Maybe Bool
+    }
+  deriving (Show)
+
+
+defParam :: (Given Cfg, S.Parsable a) => LT.Text -> (Cfg -> Maybe a) -> S.ActionM a
+defParam name def =
+    S.rescue (S.param name) $ \err ->
+      maybe (S.raise err) return $ def given
+
+
+maybeDefParam :: (Given Cfg, S.Parsable a) => LT.Text -> (Cfg -> Maybe a) -> S.ActionM (Maybe a)
+maybeDefParam name def =
+    S.rescue (Just <$> S.param name) $ const $
+      return $ def given
+
+
+data SubscribeReq = SubscribeReq
+    { reqName           :: Text
+    , reqEmailAddress   :: Text
+    , reqListId         :: Text
+    , reqEmailType      :: Maybe Text
+    , reqDoubleOptIn    :: Maybe Bool
+    , reqUpdateExisting :: Maybe Bool
+    , reqSendWelcome    :: Maybe Bool
+    }
+  deriving (Show)
+
+
+instance (Given Cfg) => ToJSON SubscribeReq where
+    toJSON req = J.object
+      [ "apikey"          .= apiKey given
+      , "merge_vars"      .= J.object ["name"  .= reqName req]
+      , "email"           .= J.object ["email" .= reqEmailAddress req]
+      , "id"              .= reqListId req
+      , "email_type"      .= reqEmailType req
+      , "double_optin"    .= reqDoubleOptIn req
+      , "update_existing" .= reqUpdateExisting req
+      , "send_welcome"    .= reqSendWelcome req
+      ]
+
+
+postSubscribeReq :: (Given Cfg) => SubscribeReq -> IO Bool
+postSubscribeReq req = do
+    mgr <- C.newManager C.tlsManagerSettings
+    url <- C.parseUrl "https://us3.api.mailchimp.com/2.0/lists/subscribe"
+    let post = url
+          { C.method      = "POST"
+          , C.requestBody = C.RequestBodyLBS $ J.encode req
+          }
+    response :: Either C.HttpException () <- try $
+      C.withResponse post mgr $ const $ return ()
+    case response of
+      Right _       -> return True
+      Left  failure -> do
+        putStrLn $ "   *** WARNING: Subscription request failed: " ++ show failure
+        return False
 
 
 subscribeToList :: (Given Cfg) => S.ActionM ()
 subscribeToList = do
-    name         <- S.param "name"
-    emailAddress <- S.param "email-address"
-    didSub       <- liftIO $ postSubRequest $ SubRequest name emailAddress
-    case didSub of
+    name           <- S.param "name"
+    emailAddress   <- S.param "email_address"
+    listId         <- defParam      "list_id"         defListId
+    emailType      <- maybeDefParam "email_type"      defEmailType
+    doubleOptIn    <- maybeDefParam "double_optin"    defDoubleOptIn
+    updateExisting <- maybeDefParam "update_existing" defUpdateExisting
+    sendWelcome    <- maybeDefParam "send_welcome"    defSendWelcome
+    let req = SubscribeReq
+          { reqName           = name
+          , reqEmailAddress   = emailAddress
+          , reqListId         = listId
+          , reqEmailType      = emailType
+          , reqDoubleOptIn    = doubleOptIn
+          , reqUpdateExisting = updateExisting
+          , reqSendWelcome    = sendWelcome
+          }
+    done <- liftIO $ postSubscribeReq req
+    case done of
       True  -> accept
       False -> rejectNotAcceptable
 
 
-postSubRequest :: (Given Cfg) => SubRequest -> IO Bool
-postSubRequest request = do
-    manager  <- C.newManager C.tlsManagerSettings
-    endpoint <- C.parseUrl "https://us3.api.mailchimp.com/2.0/lists/subscribe"
-    let post = endpoint
-          { C.method      = "POST"
-          , C.requestBody = C.RequestBodyLBS $ J.encode request
-          }
-    response :: Either C.HttpException () <- try $
-      C.withResponse post manager $ const $ return ()
-    case response of
-      Right _ -> return True
-      Left failure -> do
-        putStrLn $ "   *** WARNING: Request failed: " ++ show failure
-        return False
-
-
 main :: IO ()
 main = do
-    mailChimpApiKey <- T.pack <$> getEnv "MAILCHIMP_API_KEY"
-    mailChimpListId <- T.pack <$> getEnv "MAILCHIMP_LIST_ID"
-    websiteUrl      <- T.pack <$> getEnv "WEBSITE_URL"
-    let cfg = Cfg
-          { cfgMailChimpApiKey = mailChimpApiKey
-          , cfgMailChimpListId = mailChimpListId
-          , cfgWebsiteUrl      = websiteUrl
-          }
-    env <- getEnvironment
+    apiKey <- T.pack <$> getEnv "MAILCHIMP_API_KEY"
+    env    <- getEnvironment
     let port = maybe 8080 read $ lookup "PORT" env
+        cfg  = Cfg
+          { apiKey
+          , defListId         = T.pack   <$> lookup "MAILCHIMP_LIST_ID" env
+          , defEmailType      = T.pack   <$> lookup "MAILCHIMP_EMAIL_TYPE" env
+          , defDoubleOptIn    = (== "1") <$> lookup "MAILCHIMP_DOUBLE_OPTIN" env
+          , defUpdateExisting = (== "1") <$> lookup "MAILCHIMP_UPDATE_EXISTING" env
+          , defSendWelcome    = (== "1") <$> lookup "MAILCHIMP_SEND_WELCOME" env
+          }
     give cfg $ scotty port $ do
       S.middleware logStdout
-      S.get        "/"          redirectToWebsite
       S.post       "/subscribe" subscribeToList
-      S.notFound                rejectBadRequest
+      S.notFound   rejectBadRequest

@@ -1,5 +1,5 @@
 name:               mailchimp-subscribe
-version:            1.0
+version:            1.1
 build-type:         Simple
 cabal-version:      >= 1.20
 license:            MIT
@@ -7,12 +7,12 @@ copyright:          Copyright © 2014 Miëtek Bak
 author:             Miëtek Bak <hello@mietek.io>
 maintainer:         Miëtek Bak <hello@mietek.io>
 stability:          experimental
-homepage:           https://github.com/mietek/mailchimp-subscribe/
+homepage:           https://github.com/mietek/mailchimp-subscribe
 license-file:       LICENSE.md
 extra-source-files: README.md
-category:           Mail
+category:           Mail, Web, Service
 synopsis:           MailChimp subscription request handler
-description:        <http://mailchimp.com/ MailChimp> subscription request handler, built with <https://github.com/scotty-web/scotty/ Scotty>.  Intended to support custom signup forms.
+description:        <http://mailchimp.com/ MailChimp> subscription request handler, built with <https://github.com/scotty-web/scotty Scotty>.  Intended to support custom signup forms.
 
 executable mailchimp-subscribe
   main-is:            Main.hs
